@@ -8,6 +8,7 @@ import edu.myrza.todoapp.model.enums.FileType;
 import edu.myrza.todoapp.repos.AccessLevelRepository;
 import edu.myrza.todoapp.repos.EdgeRepository;
 import edu.myrza.todoapp.repos.StatusRepository;
+import edu.myrza.todoapp.util.Tuple;
 import edu.myrza.todoapp.util.Utils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -45,7 +46,7 @@ public class ShareService {
     public List<ShareDto> share(User owner, List<User> users, List<String> fileIds) {
 
         // 1. access users' root folders
-        List<FileRecord> rootFolders = fileService.getRootFolders(users);
+        List<Tuple<User, FileRecord>> usersAndRootFolders = fileService.getRootFolders(users);
         List<ShareDto> result = new ArrayList<>();
 
         Status deleted = statusRepo.findByCode(Status.Code.DELETED);
@@ -67,7 +68,7 @@ public class ShareService {
 
             // Here, we create new edges, each per new user and the edges point to
             // the shared file/folder
-            List<Edge> newSharedEdges = rootFolders.stream().map(toSharedEdge(file)).collect(Collectors.toList());
+            List<Edge> newSharedEdges = usersAndRootFolders.stream().map(toSharedEdge(file)).collect(Collectors.toList());
             fileService.saveEdges(newSharedEdges);
 
             // 4.
@@ -106,7 +107,8 @@ public class ShareService {
     public List<ShareDto> unShare(User owner, List<User> users, List<String> fileIds) {
 
         // 1. Access users' root folders
-        List<FileRecord> rootFolders = fileService.getRootFolders(users);
+        List<Tuple<User, FileRecord>> usersAndRootFolders = fileService.getRootFolders(users);
+        List<FileRecord> rootFolders = usersAndRootFolders.stream().map(tuple -> tuple._t2).collect(Collectors.toList());
         List<ShareDto> result = new ArrayList<>();
 
         for(String fileId : fileIds) {
@@ -154,7 +156,9 @@ public class ShareService {
     public List<ShareDto> refuseShare(User user, List<String> fileIds) {
 
         // 1. Access user's root folders
-        List<FileRecord> rootFolders = fileService.getRootFolders(Collections.singletonList(user));
+        List<FileRecord> rootFolders = fileService.getRootFolders(Collections.singletonList(user)).stream()
+                                                    .map(tuple -> tuple._t2)
+                                                    .collect(Collectors.toList());
         List<ShareDto> result = new ArrayList<>();
 
         for(String fileId : fileIds) {
@@ -193,13 +197,14 @@ public class ShareService {
         return result;
     }
 
-    private Function<FileRecord, Edge> toSharedEdge(FileRecord descendant) {
-        return ancestor -> {
+    private Function<Tuple<User, FileRecord>, Edge> toSharedEdge(FileRecord descendant) {
+        return tuple -> {
             Edge edge = new Edge();
 
             edge.setId(UUID.randomUUID().toString());
             edge.setEdgeType(EdgeType.SHARED);
-            edge.setAncestor(ancestor);
+            edge.setAncestor(tuple._t2);
+            edge.setEdgeOwner(tuple._t1);
             edge.setDescendant(descendant);
 
             return edge;

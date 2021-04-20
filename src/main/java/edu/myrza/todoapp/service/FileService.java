@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -29,7 +30,7 @@ public class FileService {
 
     private final FileSystemUtil fileSystemUtil;
     private final StatusRepository statusRepository;
-    private final FileRepository fileRepository;
+    private final FileRepository fileRepo;
     private final EdgeRepository edgeRepository;
     private final AccessLevelRepository accessLevelRepo;
 
@@ -37,13 +38,13 @@ public class FileService {
     public FileService(
             FileSystemUtil fileSystemUtil,
             StatusRepository statusRepository,
-            FileRepository fileRepository,
+            FileRepository fileRepo,
             EdgeRepository edgeRepository,
             AccessLevelRepository accessLevelRepo)
     {
         this.fileSystemUtil = fileSystemUtil;
         this.statusRepository = statusRepository;
-        this.fileRepository = fileRepository;
+        this.fileRepo = fileRepo;
         this.edgeRepository = edgeRepository;
         this.accessLevelRepo = accessLevelRepo;
     }
@@ -64,7 +65,7 @@ public class FileService {
             // Save a record about the created root folder in db
             FileRecord rootFolderRecord = FileRecord.createFolder(rootFolderName, rootFolderName, user, enabled);
 
-            return toDto(fileRepository.save(rootFolderRecord));
+            return toDto(fileRepo.save(rootFolderRecord));
         } catch (IOException ex) {
             throw new SystemException(ex, "Error creating a root folder for a user [" + user.getUsername() + "]");
         }
@@ -79,7 +80,7 @@ public class FileService {
 
         for(String id : ids) {
 
-            Optional<FileRecord> optFile = fileRepository.findById(id);
+            Optional<FileRecord> optFile = fileRepo.findById(id);
             if(!optFile.isPresent())
                 continue;
 
@@ -90,7 +91,7 @@ public class FileService {
 
             // if the file is 'file' then just save it and continue
             if(!file.getFileType().equals(FileType.FOLDER)) {
-                fileRepository.save(file);
+                fileRepo.save(file);
                 continue;
             }
 
@@ -101,7 +102,7 @@ public class FileService {
             }
 
             descendants.add(file);
-            fileRepository.saveAll(descendants);
+            fileRepo.saveAll(descendants);
 
         }
 
@@ -109,11 +110,11 @@ public class FileService {
 
     @Transactional
     public Optional<FileRecordDto> renameFile(User user, String fileId, String newName) {
-        Optional<FileRecord> optFileRecord = fileRepository.findById(fileId);
+        Optional<FileRecord> optFileRecord = fileRepo.findById(fileId);
         if(optFileRecord.isPresent()) {
             FileRecord fileRecord = optFileRecord.get();
             fileRecord.setName(newName);
-            fileRepository.save(fileRecord);
+            fileRepo.save(fileRecord);
             return Optional.of(toDto(fileRecord));
         }
 
@@ -122,40 +123,66 @@ public class FileService {
 
     // Download multiple files
     @Transactional(readOnly = true)
-    public Resource downloadFiles(User user, List<String> ids) throws IOException {
+    public Optional<Resource> downloadFiles(User user, List<String> ids) throws IOException {
 
-        // create a tree of files/folder you are gonna send back
-        List<TreeNode> nodes = buildTree(user, fileRepository.findAllById(ids));
+        // Access files to download via their ids and filter out those files that cannot be downloaded (has no access, deleted etc)
+        List<FileRecord> filesToDownload = fileRepo.findAllById(ids).stream()
+                                                                .filter(checkFileAccess(user))
+                                                                .collect(Collectors.toList());
+        if(filesToDownload.isEmpty()) return Optional.empty();
+
+        // create a tree of files/folders you are gonna send back
+        List<TreeNode> nodes = buildTree(user, filesToDownload);
 
         // use the tree to create appropriate .zip file
         File compressedFile = fileSystemUtil.compressAndReturnFiles(user.getUsername(), nodes);
 
         // turn the .zip file into resource
-        return new FileSystemResource(compressedFile);
+        return Optional.of(new FileSystemResource(compressedFile));
     }
 
     @Transactional
     public List<FileRecordDto> moveFiles(User user, String srcId, String destId, List<String> filesToMove) {
 
         // Here, we make sure all the entries are unique and are not equal to either source folder or destination folder
-        filesToMove = filesToMove.stream()
-                                    .distinct()
-                                    .filter(fileId -> !fileId.equals(srcId) && !fileId.equals(destId))
-                                    .collect(Collectors.toList());
+        filesToMove = filesToMove.stream().distinct().filter(notSrcAndDest(srcId, destId)).collect(Collectors.toList());
 
         List<FileRecordDto> result = new ArrayList<>();
 
-        // Here we access all of destination folder's ancestors
-        Optional<FileRecord> optDestFolder = fileRepository.findById(destId);
+        // Prepare source folder data
+        Optional<FileRecord> optSrc = fileRepo.findById(srcId);
+        if(!optSrc.isPresent())
+            return Collections.emptyList();
+
+        FileRecord src = optSrc.get();
+        if(!checkFileAccess(user).test(src))
+            return Collections.emptyList();
+
+        Set<FileRecord> srcAncestors = Utils.append(edgeRepository.serveOwnedAncestors(srcId), src);
+        Set<User> srcUsers = accessLevelRepo.findAllByFileIn(srcAncestors).stream()
+                                                .map(AccessLevel::getUser)
+                                                .collect(Collectors.toSet());
+
+        // Prepare destination folder data
+        Optional<FileRecord> optDestFolder = fileRepo.findById(destId);
         if(!optDestFolder.isPresent())
             return result;
 
         FileRecord destFolder = optDestFolder.get();
-        Set<FileRecord> newAncestors = Utils.append(edgeRepository.serveAncestors(destFolder.getId()), destFolder);
+        if(!checkFileAccess(user).test(src))
+            return Collections.emptyList();
 
+        Set<FileRecord> newAncestors = Utils.append(edgeRepository.serveAncestors(destFolder.getId()), destFolder);
+        List<AccessLevel> destUsersAccessLevels = accessLevelRepo.findAllByFileIn(newAncestors);
+
+        // Prepare newly created edges and newly created access levels holders
+        List<Edge> allNewEdges = new ArrayList<>();
+        List<AccessLevel> allNewAccessLevels = new ArrayList<>();
+
+        //
         for(String fileId : filesToMove) {
 
-            Optional<FileRecord> optFile = fileRepository.findById(fileId);
+            Optional<FileRecord> optFile = fileRepo.findById(fileId);
             if(!optFile.isPresent())
                 continue;
 
@@ -180,12 +207,20 @@ public class FileService {
                     return newEdge;
                 }).collect(Collectors.toList());
 
-                edgeRepository.saveAll(newEdges);
+                // new edges
+                allNewEdges.addAll(newEdges);
+
+                // new access levels
+                    // 1. delete previous access level entries
+                accessLevelRepo.deleteByUserInAndFile(srcUsers, file);
+                    // 2. set new access level entries
+                List<AccessLevel> newAccessLevels = destUsersAccessLevels.stream().map(toAccessLevel(file)).collect(Collectors.toList());
+                allNewAccessLevels.addAll(newAccessLevels);
+
                 result.add(toDto(file));
                 continue;
             }
 
-            List<Edge> allNewEdges = new ArrayList<>();
             if(file.getFileType().equals(FileType.FOLDER)) {
 
                 // 1.1 Fetch current ancestors
@@ -217,12 +252,27 @@ public class FileService {
 
                 // 2.2
                 allNewEdges.addAll(newEdges);
+
+                // new access levels
+                    // 1. delete previous access level entries
+                accessLevelRepo.deleteByUserInAndFileIn(srcUsers, descendants);
+                    // 2. set new access level entries
+                List<AccessLevel> newAccessLevels = descendants.stream()
+                                                                .flatMap(descFile -> destUsersAccessLevels.stream().map(toAccessLevel(descFile)))
+                                                                .collect(Collectors.toList());
+
+                allNewAccessLevels.addAll(newAccessLevels);
             }
 
-            if(!allNewEdges.isEmpty()) {
-                edgeRepository.saveAll(allNewEdges);
-                result.add(toDto(file));
-            }
+            result.add(toDto(file));
+        }
+
+        if(!allNewEdges.isEmpty()) {
+            edgeRepository.saveAll(allNewEdges);
+        }
+
+        if(!allNewAccessLevels.isEmpty()) {
+            accessLevelRepo.saveAll(allNewAccessLevels);
         }
 
         return result;
@@ -238,31 +288,42 @@ public class FileService {
         // First we create folderRecord
         FileRecord folderRecord = FileRecord.createFolder(UUID.randomUUID().toString(), folderName, user, enabled);
 
-        FileRecord savedFolderRecord = fileRepository.save(folderRecord);
+        FileRecord savedFolderRecord = fileRepo.save(folderRecord);
 
         // Then we create edges
-        // access all of the ancestors of 'parent' folderRecord
+        // access all of the ancestors of 'parent' folderRecord and save new edges
         Set<Edge> ancestorsEdges = edgeRepository.serveAncestors(parentId).stream()
                 .map(ancestor -> new Edge(UUID.randomUUID().toString(), ancestor, savedFolderRecord, EdgeType.INDIRECT, user))
                 .collect(Collectors.toSet());
 
         // access 'parent' folder
-        Edge parentEdge = fileRepository.findById(parentId)
-                .map(parent -> new Edge(UUID.randomUUID().toString(), parent, savedFolderRecord, EdgeType.DIRECT, user))
-                .orElseThrow(() -> new RuntimeException("No folderRecord with id [" + parentId + "] is found"));
+        Optional<FileRecord> optParent = fileRepo.findById(parentId);
+        Edge parentEdge = optParent.map(parent -> new Edge(UUID.randomUUID().toString(), parent, savedFolderRecord, EdgeType.DIRECT, user))
+                                    .orElseThrow(() -> new RuntimeException("No folderRecord with id [" + parentId + "] is found"));
 
         ancestorsEdges.add(parentEdge);
 
-        //save new edges
         edgeRepository.saveAll(ancestorsEdges);
+
+        // Assign an access level the parent folder has to new files
+        List<FileRecord> finalFileRecords = Collections.singletonList(savedFolderRecord);
+        List<AccessLevel> readOnlyAccessLevel = accessLevelRepo.findAllByFile(optParent.get()).stream()
+                                                                .flatMap(parentAccessLevel -> finalFileRecords.stream().map(toAccessLevel(parentAccessLevel)))
+                                                                .collect(Collectors.toList());
+        accessLevelRepo.saveAll(readOnlyAccessLevel);
 
         return toDto(savedFolderRecord);
     }
 
     @Transactional(readOnly = true)
     public List<FileRecordDto> serveFolderContent(User user, String folderId) {
+
+        Optional<FileRecord> optFolder = fileRepo.findById(folderId).filter(checkFileAccess(user));
+        if(!optFolder.isPresent())
+            return Collections.emptyList();
+
         return edgeRepository.serveDescendants(folderId, Arrays.asList(EdgeType.DIRECT, EdgeType.SHARED)).stream()
-                             .filter(byUser(user))
+                             .filter(checkFileAccess(user))
                              .map(this::toDto)
                              .collect(Collectors.toList());
     }
@@ -284,12 +345,11 @@ public class FileService {
         for(MultipartFileDecorator savedFile : savedFiles) {
             fileRecords.add(toFile(user, savedFile));
         }
-        fileRecords = fileRepository.saveAll(fileRecords);
+        fileRecords = fileRepo.saveAll(fileRecords);
 
         // Create and save edges/connection from all of the ancestors to the files (The Closure table)
-        FileRecord parent = fileRepository.getOne(folderId);
-        Set<FileRecord> ancestors = edgeRepository.serveAncestors(folderId);
-        ancestors.add(parent);
+        FileRecord parent = fileRepo.getOne(folderId);
+        Set<FileRecord> ancestors = Utils.append(edgeRepository.serveOwnedAncestors(folderId), parent);
 
         List<Edge> edges = fileRecords.stream()
                                         .flatMap(descendant -> ancestors.stream().map(ancestor -> toEdge(user,parent,ancestor,descendant)))
@@ -297,41 +357,54 @@ public class FileService {
 
         edgeRepository.saveAll(edges);
 
+        // Assign an access level the parent folder has to new files
+        List<FileRecord> finalFileRecords = fileRecords;
+        List<AccessLevel> readOnlyAccessLevel = accessLevelRepo.findAllByFile(parent).stream()
+                                                                .flatMap(parentAccessLevel -> finalFileRecords.stream().map(toAccessLevel(parentAccessLevel)))
+                                                                .collect(Collectors.toList());
+        accessLevelRepo.saveAll(readOnlyAccessLevel);
+
         return fileRecords.stream().map(this::toDto).collect(Collectors.toList());
     }
 
     // Download single file
     @Transactional
-    public ResourceDecorator downloadFile(User user, String fileId) {
+    public Optional<ResourceDecorator> downloadFile(User user, String fileId) {
 
-        FileRecord fileRecord = fileRepository.findById(fileId).orElseThrow(() -> new RuntimeException("File [" + fileId + "] not found"));
+        Optional<FileRecord> optFile = fileRepo.findById(fileId).filter(checkFileAccess(user));
+        if(!optFile.isPresent())
+            return Optional.empty();
 
-        // Check if the file has been deleted by owner
-        if(fileRecord.getStatus().getCode().equals(Status.Code.DELETED))
-            throw new RuntimeException("throw appropriate exception here");
-
-        if(!fileRecord.getOwner().equals(user) && !accessLevelRepo.hasReadOnlyLevel(user, fileRecord))
-            throw new RuntimeException("The user has no right to download the file. throw appropriate exception here");
-
+        FileRecord fileRecord = optFile.get();
         ResourceDecorator resourceDecorator = new ResourceDecorator();
 
         File file = fileSystemUtil.serveFile(user.getUsername(), fileId, fileRecord.getExtension());
         resourceDecorator.setResource(new FileSystemResource(file));
         resourceDecorator.setOriginalName(fileRecord.getName());
 
-        return resourceDecorator;
+        return Optional.of(resourceDecorator);
     }
 
     // HELPER OPERATIONS
 
-
     Optional<FileRecord> findById(String id) {
-        return fileRepository.findById(id);
+        return fileRepo.findById(id);
     }
 
-    List<FileRecord> getRootFolders(List<User> users) {
+    @Transactional
+    List<Tuple<User, FileRecord>> getRootFolders(List<User> users) {
         List<String> ids = users.stream().map(User::getUsername).collect(Collectors.toList());
-        return fileRepository.findAllById(ids);
+        List<FileRecord> rootFolders = fileRepo.findAllById(ids);
+
+        return users.stream().map(user -> {
+                        return new Tuple<>(user, rootFolders.stream().filter(rf -> rf.getOwner().equals(user)).findAny());
+                    }).filter(tuple -> {
+                        return tuple._t2.isPresent();
+                    })
+                    .map(tuple -> {
+                        return new Tuple<>(tuple._t1, tuple._t2.get());
+                    })
+                    .collect(Collectors.toList());
     }
 
     Set<FileRecord> getAllDescendants(FileRecord folder) {
@@ -346,12 +419,6 @@ public class FileService {
         List<TreeNode> nodes = new ArrayList<>();
 
         for(FileRecord file : files) {
-
-            if(file.getStatus().getCode().equals(Status.Code.DELETED))
-                continue;
-
-            if(!file.getOwner().equals(user) && !accessLevelRepo.hasReadOnlyLevel(user, file))
-                continue;
 
             if(file.getFileType().equals(FileType.FILE)) {
                 FileTreeNode treeNode = new FileTreeNode();
@@ -376,6 +443,15 @@ public class FileService {
         }
 
         return nodes;
+    }
+
+    private Predicate<FileRecord> checkFileAccess(User currentUser) {
+        return file -> {
+            // file has been deleted
+            if(file.getStatus().getCode().equals(Status.Code.DELETED)) return false;
+            // the current user is not an owner and has no access level for downloading
+            return file.getOwner().equals(currentUser) || accessLevelRepo.hasReadOnlyLevel(currentUser, file);
+        };
     }
 
     private String extractExt(String fileOriginalName) {
@@ -426,7 +502,29 @@ public class FileService {
         return edge;
     }
 
-    private Predicate<FileRecord> byUser(User user) {
-        return file -> file.getOwner().equals(user) || accessLevelRepo.hasReadOnlyLevel(user, file);
+    private Function<FileRecord, AccessLevel> toAccessLevel(AccessLevel parentAccessLevel) {
+        return file -> {
+            AccessLevel accessLevel = new AccessLevel();
+            accessLevel.setId(UUID.randomUUID().toString());
+            accessLevel.setLevel(parentAccessLevel.getLevel());
+            accessLevel.setUser(parentAccessLevel.getUser());
+            accessLevel.setFile(file);
+            return accessLevel;
+        };
+    }
+
+    private Function<AccessLevel, AccessLevel> toAccessLevel(FileRecord file) {
+        return parentAccessLevel -> {
+            AccessLevel accessLevel = new AccessLevel();
+            accessLevel.setId(UUID.randomUUID().toString());
+            accessLevel.setLevel(parentAccessLevel.getLevel());
+            accessLevel.setUser(parentAccessLevel.getUser());
+            accessLevel.setFile(file);
+            return accessLevel;
+        };
+    }
+
+    private Predicate<String> notSrcAndDest(String srcId, String destId) {
+        return fileId -> !srcId.equals(fileId) && !destId.equals(fileId);
     }
 }

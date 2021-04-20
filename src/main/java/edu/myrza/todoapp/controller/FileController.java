@@ -48,8 +48,12 @@ public class FileController {
     public ResponseEntity<Resource> serveFiles(Principal principal, @RequestBody FileIdsWrapper idsWrapper) throws IOException {
 
         User user = userService.loadUserByUsername(principal.getName());
-        Resource resource = fileService.downloadFiles(user, idsWrapper.getFileIds());
+        Optional<Resource> optResource = fileService.downloadFiles(user, idsWrapper.getFileIds());
 
+        if(!optResource.isPresent())
+            return ResponseEntity.noContent().build();
+
+        Resource resource = optResource.get();
         return ResponseEntity.ok()
                 .header(CONTENT_DISPOSITION, String.format(CONTENT_DISPOSITION_ATTACH, "files.zip"))
                 .contentLength(resource.contentLength())
@@ -73,10 +77,7 @@ public class FileController {
     // FOLDER OPERATIONS
 
     @PostMapping("/folder/{parentFolderId}/new/{newFolderName}")
-    public FileRecordDto createFolder(
-            Principal principal,
-            @PathVariable("parentFolderId") String parentFolderId,
-            @PathVariable("newFolderName") String newFolderName)
+    public FileRecordDto createFolder(Principal principal, @PathVariable("parentFolderId") String parentFolderId, @PathVariable("newFolderName") String newFolderName)
     {
         User user = userService.loadUserByUsername(principal.getName());
         return fileService.createFolder(user, parentFolderId, newFolderName);
@@ -91,10 +92,7 @@ public class FileController {
     // FILE OPERATIONS
 
     @PostMapping("/folder/{folderId}/upload")
-    public List<FileRecordDto> uploadFiles(
-            Principal principal,
-            @PathVariable("folderId") String folderId,
-            @ModelAttribute("files") MultipartFile[] files)
+    public List<FileRecordDto> uploadFiles(Principal principal, @PathVariable("folderId") String folderId, @ModelAttribute("files") MultipartFile[] files)
     {
         User user = userService.loadUserByUsername(principal.getName());
         return fileService.uploadFiles(user, folderId, files);
@@ -103,7 +101,11 @@ public class FileController {
     @GetMapping("/file/download/{fileId}")
     public ResponseEntity<Resource> serveFile(Principal principal, @PathVariable("fileId") String fileId) throws IOException {
         User user = userService.loadUserByUsername(principal.getName());
-        ResourceDecorator decorator = fileService.downloadFile(user, fileId);
+        Optional<ResourceDecorator> optDecorator = fileService.downloadFile(user, fileId);
+        if(!optDecorator.isPresent())
+            return ResponseEntity.noContent().build();
+
+        ResourceDecorator decorator = optDecorator.get();
         Resource resource = decorator.getResource();
         String origName = decorator.getOriginalName();
 

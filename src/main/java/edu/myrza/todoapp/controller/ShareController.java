@@ -31,7 +31,7 @@ public class ShareController {
     @PostMapping("/share")
     public List<ShareDto> share(Principal principal, @RequestBody ShareReq req) {
 
-        // 1. Get this method call author
+        // 1. Get this method call owner
         User owner = userService.loadUserByUsername(principal.getName());
 
         // 2. Get other users
