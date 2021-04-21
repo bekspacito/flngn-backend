@@ -86,7 +86,7 @@ public class ShareService {
                 // 4.2. Add new entries into 'access_level' table for the file and it's sub-files as well
                 Set<FileRecord> descendants = Utils.append(fileService.getAllDescendants(file), file);
                 List<AccessLevel> accessLevelEntries = descendants.stream()
-                                                                    .flatMap(descendant -> users.stream().map(toAccessLevel(file)))
+                                                                    .flatMap(descendant -> users.stream().map(toAccessLevel(descendant)))
                                                                     .collect(Collectors.toList());
 
                 accessLevelRepo.saveAll(accessLevelEntries);
@@ -141,8 +141,8 @@ public class ShareService {
                 accessLevelRepo.deleteByUserInAndFileIn(new HashSet<>(users), descendants);
                 // log the action
                 List<ShareDto> logs = descendants.stream()
-                        .flatMap(descendant -> users.stream().map(user -> new ShareDto(user.getId(), descendant.getId())))
-                        .collect(Collectors.toList());
+                                                .flatMap(descendant -> users.stream().map(user -> new ShareDto(user.getId(), descendant.getId())))
+                                                .collect(Collectors.toList());
                 result.addAll(logs);
             }
         }

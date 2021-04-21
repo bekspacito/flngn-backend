@@ -42,8 +42,7 @@ public class SecurityConfigurer extends WebSecurityConfigurerAdapter {
         String[] userAllowedURIs = { "/folder/**","/file/**","/share","/unshare","/share/refuse" };
 
         http.csrf().disable().authorizeRequests()
-                .antMatchers("/","/register","/login","static/**",
-                "/file").permitAll()
+                .antMatchers("/","/register","/login","static/**").permitAll()
                 .antMatchers(userAllowedURIs).hasRole("USER") // only user
                 .antMatchers("/logout").hasAnyRole("USER", "ADMIN") // EITHER admin OR user
                 .and()

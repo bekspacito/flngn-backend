@@ -172,7 +172,7 @@ public class FileService {
         if(!checkFileAccess(user).test(src))
             return Collections.emptyList();
 
-        Set<FileRecord> newAncestors = Utils.append(edgeRepository.serveAncestors(destFolder.getId()), destFolder);
+        Set<FileRecord> newAncestors = Utils.append(edgeRepository.serveOwnedAncestors(destFolder.getId()), destFolder);
         List<AccessLevel> destUsersAccessLevels = accessLevelRepo.findAllByFileIn(newAncestors);
 
         // Prepare newly created edges and newly created access levels holders
@@ -224,7 +224,7 @@ public class FileService {
             if(file.getFileType().equals(FileType.FOLDER)) {
 
                 // 1.1 Fetch current ancestors
-                Set<FileRecord> currentAncestors = edgeRepository.serveAncestors(file.getId());
+                Set<FileRecord> currentAncestors = edgeRepository.serveOwnedAncestors(file.getId());
 
                 // 1.2 Fetch all of the descendants + add the folder itself
                 Set<FileRecord> descendants = Utils.append(edgeRepository.serveAllDescendants(file.getId()), file);
