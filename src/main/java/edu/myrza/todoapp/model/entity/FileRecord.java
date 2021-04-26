@@ -29,6 +29,7 @@ public class FileRecord {
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "status_id")
     private Status status;
+    @Enumerated(EnumType.STRING)
     private FileType fileType;
 
     public FileRecord () {}
