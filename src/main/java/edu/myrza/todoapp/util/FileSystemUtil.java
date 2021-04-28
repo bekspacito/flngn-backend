@@ -75,7 +75,7 @@ public class FileSystemUtil {
         return Paths.get(tmpDir, zipFileName).toFile();
     }
 
-    private void compressAndReturnFilesRec(String username, String path, List<TreeNode> nodes, ZipOutputStream zos, byte[] buffer) throws IOException {
+    private void compressAndReturnFilesRec(String username, String path, List<? extends TreeNode> nodes, ZipOutputStream zos, byte[] buffer) throws IOException {
 
         // If folder is empty and it isn't a "root" folder, then we create an empty folder
         if(nodes.isEmpty() && !path.isEmpty()) {

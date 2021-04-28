@@ -1,11 +1,10 @@
 package edu.myrza.todoapp.controller;
 
 import edu.myrza.todoapp.exceptions.BussinesException;
-import edu.myrza.todoapp.model.dto.auth.LoginRequest;
-import edu.myrza.todoapp.model.dto.auth.LoginResponse;
-import edu.myrza.todoapp.model.dto.auth.RegistrationRequest;
-import edu.myrza.todoapp.model.dto.auth.RegistrationResponse;
-import edu.myrza.todoapp.model.dto.files.FileRecordDto;
+import edu.myrza.todoapp.model.dto.user.LoginRequest;
+import edu.myrza.todoapp.model.dto.user.LoginResponse;
+import edu.myrza.todoapp.model.dto.user.RegistrationRequest;
+import edu.myrza.todoapp.model.dto.user.UserDto;
 import edu.myrza.todoapp.model.entity.User;
 import edu.myrza.todoapp.service.FileService;
 import edu.myrza.todoapp.service.UserService;
@@ -15,26 +14,23 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
-public class AuthenticationController {
+public class UserController {
 
     private final AuthenticationManager authenticationManager;
     private final UserService userService;
-    private final FileService fileService;
     private final JwtUtil jwtUtil;
 
     @Autowired
-    public AuthenticationController(
+    public UserController(
             AuthenticationManager authenticationManager,
             UserService userService,
-            FileService fileService,
             JwtUtil jwtUtil)
     {
-        this.fileService = fileService;
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
         this.userService = userService;
@@ -69,5 +65,10 @@ public class AuthenticationController {
     @PostMapping("/register")
     public ResponseEntity<?> registerNewUser(@RequestBody RegistrationRequest req) {
         return ResponseEntity.ok(userService.registerUser(req));
+    }
+
+    @GetMapping("/user/search/{namechunk}")
+    public List<UserDto> searchByName(@PathVariable("namechunk") String namechunk) {
+        return userService.searchByName(namechunk);
     }
 }

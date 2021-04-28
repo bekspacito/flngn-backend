@@ -6,6 +6,7 @@ import edu.myrza.todoapp.model.dto.files.MoveFilesReq;
 import edu.myrza.todoapp.model.entity.User;
 import edu.myrza.todoapp.service.FileService;
 import edu.myrza.todoapp.service.UserService;
+import edu.myrza.todoapp.util.FolderTreeNode;
 import edu.myrza.todoapp.util.ResourceDecorator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
@@ -75,6 +76,11 @@ public class FileController {
     }
 
     // FOLDER OPERATIONS
+    @GetMapping("/folder/tree")
+    public FolderTreeNode buildFileSystemTree(Principal principal) {
+        User user = userService.loadUserByUsername(principal.getName());
+        return fileService.buildFileSystemTree(user);
+    }
 
     @PostMapping("/folder/{parentFolderId}/new/{newFolderName}")
     public FileRecordDto createFolder(Principal principal, @PathVariable("parentFolderId") String parentFolderId, @PathVariable("newFolderName") String newFolderName)

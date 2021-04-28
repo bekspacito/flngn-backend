@@ -39,7 +39,7 @@ public class SecurityConfigurer extends WebSecurityConfigurerAdapter {
     @Override
     protected void configure(HttpSecurity http) throws Exception {
 
-        String[] userAllowedURIs = { "/folder/**","/file/**","/share","/unshare","/share/refuse" };
+        String[] userAllowedURIs = { "/folder/**","/file/**","/share/**","/unshare","/user/search" };
 
         http.csrf().disable().authorizeRequests()
                 .antMatchers("/","/register","/login","static/**").permitAll()

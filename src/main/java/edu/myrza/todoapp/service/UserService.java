@@ -1,8 +1,9 @@
 package edu.myrza.todoapp.service;
 
-import edu.myrza.todoapp.model.dto.auth.RegistrationRequest;
-import edu.myrza.todoapp.model.dto.auth.RegistrationResponse;
+import edu.myrza.todoapp.model.dto.user.RegistrationRequest;
+import edu.myrza.todoapp.model.dto.user.RegistrationResponse;
 import edu.myrza.todoapp.model.dto.files.FileRecordDto;
+import edu.myrza.todoapp.model.dto.user.UserDto;
 import edu.myrza.todoapp.model.entity.Role;
 import edu.myrza.todoapp.model.entity.Status;
 import edu.myrza.todoapp.model.entity.User;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class UserService implements UserDetailsService {
@@ -83,6 +85,21 @@ public class UserService implements UserDetailsService {
         String token = jwtUtil.generateToken(user);
 
         return new RegistrationResponse(username, email, token, root.getId());
+    }
+
+    public List<UserDto> searchByName(String namechunk) {
+        return userRepo.findAllByUsernameLike("%" + namechunk + "%")
+                    .stream()
+                    .map(this::toDto)
+                    .collect(Collectors.toList());
+    }
+
+    private UserDto toDto(User user) {
+        UserDto dto = new UserDto();
+
+        dto.setUsername(user.getUsername());
+
+        return dto;
     }
 
 }

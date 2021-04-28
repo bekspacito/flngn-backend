@@ -14,4 +14,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     List<User> findAllByUsernameIn(List<String> usernames);
 
+    List<User> findAllByUsernameLike(String namechunk);
+
 }

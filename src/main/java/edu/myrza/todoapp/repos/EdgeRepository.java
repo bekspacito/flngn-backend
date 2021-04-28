@@ -22,6 +22,7 @@ public interface EdgeRepository extends JpaRepository<Edge, String> {
     @Query("select e.ancestor from Edge e where e.descendant.id = :descendantId")
     Set<FileRecord> serveAncestors(@Param("descendantId") String fileId);
 
+    //TODO : Seems like this part won't work, test it !!!
     @Query("select e.ancestor from Edge e where e.descendant.id = :descendantId and e.edgeType in ('DIRECT','INDIRECT')")
     Set<FileRecord> serveOwnedAncestors(@Param("descendantId") String fileId);
 
@@ -40,6 +41,13 @@ public interface EdgeRepository extends JpaRepository<Edge, String> {
 
     @Query("select e.descendant from Edge e where e.ancestor.id = :folderId and e.descendant.status.code <> 'DELETED' and e.edgeType in :edgeType")
     List<FileRecord> serveDescendants(@Param("folderId") String folderId, @Param("edgeType") List<EdgeType> edgeType);
+
+    @Query("select e from Edge e where " +
+            "e.ancestor.id = :folderId and " +
+            "e.descendant.status.code <> 'DELETED' and " +
+            "e.descendant.fileType = :fileType and " +
+            "e.edgeType in :edgeType")
+    List<Edge> serveEdges(@Param("folderId") String folderId, @Param("fileType") FileType fileType, @Param("edgeType") List<EdgeType> edgeType);
 
     void deleteByAncestorInAndDescendantIn(Set<FileRecord> ancestors, Set<FileRecord> descendants);
 

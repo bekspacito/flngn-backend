@@ -3,6 +3,7 @@ package edu.myrza.todoapp.service;
 import edu.myrza.todoapp.exceptions.SystemException;
 import edu.myrza.todoapp.model.dto.files.FileRecordDto;
 import edu.myrza.todoapp.model.entity.*;
+import edu.myrza.todoapp.model.enums.AccessLevelType;
 import edu.myrza.todoapp.model.enums.EdgeType;
 import edu.myrza.todoapp.model.enums.FileType;
 import edu.myrza.todoapp.repos.AccessLevelRepository;
@@ -65,7 +66,7 @@ public class FileService {
             // Save a record about the created root folder in db
             FileRecord rootFolderRecord = FileRecord.createFolder(rootFolderName, rootFolderName, user, enabled);
 
-            return toDto(fileRepo.save(rootFolderRecord));
+            return toDtoByOwner(fileRepo.save(rootFolderRecord));
         } catch (IOException ex) {
             throw new SystemException(ex, "Error creating a root folder for a user [" + user.getUsername() + "]");
         }
@@ -115,7 +116,7 @@ public class FileService {
             FileRecord fileRecord = optFileRecord.get();
             fileRecord.setName(newName);
             fileRepo.save(fileRecord);
-            return Optional.of(toDto(fileRecord));
+            return Optional.of(toDtoByOwner(fileRecord));
         }
 
         return Optional.empty();
@@ -217,7 +218,7 @@ public class FileService {
                 List<AccessLevel> newAccessLevels = destUsersAccessLevels.stream().map(toAccessLevel(file)).collect(Collectors.toList());
                 allNewAccessLevels.addAll(newAccessLevels);
 
-                result.add(toDto(file));
+                result.add(toDtoByOwner(file));
                 continue;
             }
 
@@ -264,7 +265,7 @@ public class FileService {
                 allNewAccessLevels.addAll(newAccessLevels);
             }
 
-            result.add(toDto(file));
+            result.add(toDtoByOwner(file));
         }
 
         if(!allNewEdges.isEmpty()) {
@@ -279,6 +280,40 @@ public class FileService {
     }
 
     // FOLDER OPERATIONS
+
+    // TODO : Test the method !!!
+    @Transactional(readOnly = true)
+    public FolderTreeNode buildFileSystemTree(User user) {
+
+        List<Edge> edges = edgeRepository.serveEdges(user.getUsername(), FileType.FOLDER, Arrays.asList(EdgeType.DIRECT, EdgeType.INDIRECT));
+        Queue<FolderTreeNode> queue = new ArrayDeque<>();
+
+        FolderTreeNode root = new FolderTreeNode(user.getUsername(), user.getUsername());
+
+        queue.add(root);
+        while(!queue.isEmpty()) {
+            FolderTreeNode currentNode = queue.poll();
+            // Direct sub nodes to 'currentNode'
+            List<FolderTreeNode> directSubNodes = edges.stream()
+                                                         .filter(predicate(user.getUsername(), currentNode))
+                                                         .map(e -> new FolderTreeNode(e.getDescendant().getId(), e.getDescendant().getName()))
+                                                         .peek(queue::add)
+                                                         .collect(Collectors.toList());
+            currentNode.setSubnodes(directSubNodes);
+        }
+
+        return root;
+    }
+
+    private Predicate<Edge> predicate(String username, FolderTreeNode currentNode) {
+        return edge -> {
+            if(currentNode.getId().equals(username) // given current node is a root
+                    && edge.getAncestor().getId().equals(currentNode.getId()) // given current node is ancestor
+                    && edge.getEdgeType().equals(EdgeType.DIRECT)) // descendant is direct
+                return true;
+            return edge.getAncestor().getId().equals(currentNode.getId());
+        };
+    }
 
     @Transactional
     public FileRecordDto createFolder(User user, String parentId, String folderName) {
@@ -312,7 +347,7 @@ public class FileService {
                                                                 .collect(Collectors.toList());
         accessLevelRepo.saveAll(readOnlyAccessLevel);
 
-        return toDto(savedFolderRecord);
+        return toDtoByOwner(savedFolderRecord);
     }
 
     @Transactional(readOnly = true)
@@ -324,7 +359,7 @@ public class FileService {
 
         return edgeRepository.serveDescendants(folderId, Arrays.asList(EdgeType.DIRECT, EdgeType.SHARED)).stream()
                              .filter(checkFileAccess(user))
-                             .map(this::toDto)
+                             .map(toDtoByUser(user))
                              .collect(Collectors.toList());
     }
 
@@ -364,7 +399,7 @@ public class FileService {
                                                                 .collect(Collectors.toList());
         accessLevelRepo.saveAll(readOnlyAccessLevel);
 
-        return fileRecords.stream().map(this::toDto).collect(Collectors.toList());
+        return fileRecords.stream().map(this::toDtoByOwner).collect(Collectors.toList());
     }
 
     // Download single file
@@ -478,14 +513,33 @@ public class FileService {
         );
     }
 
-    private FileRecordDto toDto (FileRecord fileRecord) {
+    // Mapping to dto is done by a file's owner
+    private FileRecordDto toDtoByOwner(FileRecord fileRecord) {
         FileRecordDto dto = new FileRecordDto();
         dto.setId(fileRecord.getId());
         dto.setName(fileRecord.getName());
         dto.setType(fileRecord.getFileType());
         dto.setSize(fileRecord.getSize());
         dto.setLastUpdate(fileRecord.getUpdatedAt());
+        dto.setAccessLevel(AccessLevelType.READ_WRITE);
         return dto;
+    }
+
+    // Mapping to dto is done by some user (might not be a file's owner)
+    private Function<FileRecord,FileRecordDto> toDtoByUser(User currentUser) {
+        return fileRecord -> {
+            FileRecordDto dto = new FileRecordDto();
+            dto.setId(fileRecord.getId());
+            dto.setName(fileRecord.getName());
+            dto.setType(fileRecord.getFileType());
+            dto.setSize(fileRecord.getSize());
+            dto.setLastUpdate(fileRecord.getUpdatedAt());
+            if (!fileRecord.getOwner().equals(currentUser))
+                dto.setAccessLevel(AccessLevelType.READ_ONLY);
+            else
+                dto.setAccessLevel(AccessLevelType.READ_WRITE);
+            return dto;
+        };
     }
 
     private Edge toEdge(User owner, FileRecord parent, FileRecord ancestor, FileRecord descendant) {

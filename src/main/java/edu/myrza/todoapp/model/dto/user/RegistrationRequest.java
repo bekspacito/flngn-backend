@@ -1,4 +1,4 @@
-package edu.myrza.todoapp.model.dto.auth;
+package edu.myrza.todoapp.model.dto.user;
 
 import lombok.Getter;
 import lombok.Setter;
