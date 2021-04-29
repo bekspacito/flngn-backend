@@ -2,6 +2,7 @@ package edu.myrza.todoapp.controller;
 
 import edu.myrza.todoapp.model.dto.files.FileIdsWrapper;
 import edu.myrza.todoapp.model.dto.files.FileRecordDto;
+import edu.myrza.todoapp.model.dto.files.FolderContentDto;
 import edu.myrza.todoapp.model.dto.files.MoveFilesReq;
 import edu.myrza.todoapp.model.entity.User;
 import edu.myrza.todoapp.service.FileService;
@@ -90,7 +91,7 @@ public class FileController {
     }
 
     @GetMapping("/folder/{folderId}/content")
-    public List<FileRecordDto> serveFolderContent(Principal principal, @PathVariable("folderId") String folderId) {
+    public FolderContentDto serveFolderContent(Principal principal, @PathVariable("folderId") String folderId) {
         User user = userService.loadUserByUsername(principal.getName());
         return fileService.serveFolderContent(user, folderId);
     }

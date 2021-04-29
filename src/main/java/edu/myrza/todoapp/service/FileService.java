@@ -2,6 +2,8 @@ package edu.myrza.todoapp.service;
 
 import edu.myrza.todoapp.exceptions.SystemException;
 import edu.myrza.todoapp.model.dto.files.FileRecordDto;
+import edu.myrza.todoapp.model.dto.files.FolderContentDto;
+import edu.myrza.todoapp.model.dto.search.NavDto;
 import edu.myrza.todoapp.model.entity.*;
 import edu.myrza.todoapp.model.enums.AccessLevelType;
 import edu.myrza.todoapp.model.enums.EdgeType;
@@ -30,23 +32,28 @@ import java.util.stream.Stream;
 public class FileService {
 
     private final FileSystemUtil fileSystemUtil;
-    private final StatusRepository statusRepository;
+
+    private final FileSearchService fileSearchService;
+
+    private final StatusRepository statusRepo;
     private final FileRepository fileRepo;
-    private final EdgeRepository edgeRepository;
+    private final EdgeRepository edgeRepo;
     private final AccessLevelRepository accessLevelRepo;
 
     @Autowired
     public FileService(
             FileSystemUtil fileSystemUtil,
-            StatusRepository statusRepository,
+            FileSearchService fileSearchService,
+            StatusRepository statusRepo,
             FileRepository fileRepo,
-            EdgeRepository edgeRepository,
+            EdgeRepository edgeRepo,
             AccessLevelRepository accessLevelRepo)
     {
         this.fileSystemUtil = fileSystemUtil;
-        this.statusRepository = statusRepository;
+        this.fileSearchService = fileSearchService;
+        this.statusRepo = statusRepo;
         this.fileRepo = fileRepo;
-        this.edgeRepository = edgeRepository;
+        this.edgeRepo = edgeRepo;
         this.accessLevelRepo = accessLevelRepo;
     }
 
@@ -61,7 +68,7 @@ public class FileService {
             String rootFolderName = user.getUsername();
             fileSystemUtil.createUserRootFolder(rootFolderName);
 
-            Status enabled = statusRepository.findByCode(Status.Code.ENABLED);
+            Status enabled = statusRepo.findByCode(Status.Code.ENABLED);
 
             // Save a record about the created root folder in db
             FileRecord rootFolderRecord = FileRecord.createFolder(rootFolderName, rootFolderName, user, enabled);
@@ -77,7 +84,7 @@ public class FileService {
     @Transactional
     public void deleteFiles(User user, List<String> ids) {
 
-        Status deleted = statusRepository.findByCode(Status.Code.DELETED);
+        Status deleted = statusRepo.findByCode(Status.Code.DELETED);
 
         for(String id : ids) {
 
@@ -97,7 +104,7 @@ public class FileService {
             }
 
             // if the file is a folder then mark it's sub folders/files as 'deleted'
-            Set<FileRecord> descendants = edgeRepository.serveAllDescendants(file.getId());
+            Set<FileRecord> descendants = edgeRepo.serveAllDescendants(file.getId());
             for(FileRecord descendant : descendants) {
                 descendant.setStatus(deleted);
             }
@@ -159,7 +166,7 @@ public class FileService {
         if(!checkFileAccess(user).test(src))
             return Collections.emptyList();
 
-        Set<FileRecord> srcAncestors = Utils.append(edgeRepository.serveOwnedAncestors(srcId), src);
+        Set<FileRecord> srcAncestors = Utils.append(edgeRepo.serveOwnedAncestors(srcId), src);
         Set<User> srcUsers = accessLevelRepo.findAllByFileIn(srcAncestors).stream()
                                                 .map(AccessLevel::getUser)
                                                 .collect(Collectors.toSet());
@@ -173,7 +180,7 @@ public class FileService {
         if(!checkFileAccess(user).test(src))
             return Collections.emptyList();
 
-        Set<FileRecord> newAncestors = Utils.append(edgeRepository.serveOwnedAncestors(destFolder.getId()), destFolder);
+        Set<FileRecord> newAncestors = Utils.append(edgeRepo.serveOwnedAncestors(destFolder.getId()), destFolder);
         List<AccessLevel> destUsersAccessLevels = accessLevelRepo.findAllByFileIn(newAncestors);
 
         // Prepare newly created edges and newly created access levels holders
@@ -191,7 +198,7 @@ public class FileService {
 
             if(file.getFileType().equals(FileType.FILE)) {
                 // 1.
-                edgeRepository.deleteByDescendant(file);
+                edgeRepo.deleteByDescendant(file);
                 // 2.
                 List<Edge> newEdges = newAncestors.stream().map(newAncestor -> {
                     Edge newEdge = new Edge();
@@ -225,13 +232,13 @@ public class FileService {
             if(file.getFileType().equals(FileType.FOLDER)) {
 
                 // 1.1 Fetch current ancestors
-                Set<FileRecord> currentAncestors = edgeRepository.serveOwnedAncestors(file.getId());
+                Set<FileRecord> currentAncestors = edgeRepo.serveOwnedAncestors(file.getId());
 
                 // 1.2 Fetch all of the descendants + add the folder itself
-                Set<FileRecord> descendants = Utils.append(edgeRepository.serveAllDescendants(file.getId()), file);
+                Set<FileRecord> descendants = Utils.append(edgeRepo.serveAllDescendants(file.getId()), file);
 
                 // 1.3 Delete every edge between 'currentAncestors' and 'descendants'
-                edgeRepository.deleteByAncestorInAndDescendantIn(currentAncestors, descendants);
+                edgeRepo.deleteByAncestorInAndDescendantIn(currentAncestors, descendants);
 
                 // 2.1
                 List<Edge> newEdges = newAncestors.stream()
@@ -269,7 +276,7 @@ public class FileService {
         }
 
         if(!allNewEdges.isEmpty()) {
-            edgeRepository.saveAll(allNewEdges);
+            edgeRepo.saveAll(allNewEdges);
         }
 
         if(!allNewAccessLevels.isEmpty()) {
@@ -285,7 +292,7 @@ public class FileService {
     @Transactional(readOnly = true)
     public FolderTreeNode buildFileSystemTree(User user) {
 
-        List<Edge> edges = edgeRepository.serveEdges(user.getUsername(), FileType.FOLDER, Arrays.asList(EdgeType.DIRECT, EdgeType.INDIRECT));
+        List<Edge> edges = edgeRepo.serveEdges(user.getUsername(), FileType.FOLDER, Arrays.asList(EdgeType.DIRECT, EdgeType.INDIRECT));
         Queue<FolderTreeNode> queue = new ArrayDeque<>();
 
         FolderTreeNode root = new FolderTreeNode(user.getUsername(), user.getUsername());
@@ -318,7 +325,7 @@ public class FileService {
     @Transactional
     public FileRecordDto createFolder(User user, String parentId, String folderName) {
 
-        Status enabled = statusRepository.findByCode(Status.Code.ENABLED);
+        Status enabled = statusRepo.findByCode(Status.Code.ENABLED);
 
         // First we create folderRecord
         FileRecord folderRecord = FileRecord.createFolder(UUID.randomUUID().toString(), folderName, user, enabled);
@@ -327,7 +334,7 @@ public class FileService {
 
         // Then we create edges
         // access all of the ancestors of 'parent' folderRecord and save new edges
-        Set<Edge> ancestorsEdges = edgeRepository.serveAncestors(parentId).stream()
+        Set<Edge> ancestorsEdges = edgeRepo.serveAncestors(parentId).stream()
                 .map(ancestor -> new Edge(UUID.randomUUID().toString(), ancestor, savedFolderRecord, EdgeType.INDIRECT, user))
                 .collect(Collectors.toSet());
 
@@ -338,7 +345,7 @@ public class FileService {
 
         ancestorsEdges.add(parentEdge);
 
-        edgeRepository.saveAll(ancestorsEdges);
+        edgeRepo.saveAll(ancestorsEdges);
 
         // Assign an access level the parent folder has to new files
         List<FileRecord> finalFileRecords = Collections.singletonList(savedFolderRecord);
@@ -351,16 +358,21 @@ public class FileService {
     }
 
     @Transactional(readOnly = true)
-    public List<FileRecordDto> serveFolderContent(User user, String folderId) {
-
+    public FolderContentDto serveFolderContent(User user, String folderId) {
+        // prepare content
         Optional<FileRecord> optFolder = fileRepo.findById(folderId).filter(checkFileAccess(user));
         if(!optFolder.isPresent())
-            return Collections.emptyList();
+            return new FolderContentDto();
 
-        return edgeRepository.serveDescendants(folderId, Arrays.asList(EdgeType.DIRECT, EdgeType.SHARED)).stream()
-                             .filter(checkFileAccess(user))
-                             .map(toDtoByUser(user))
-                             .collect(Collectors.toList());
+        List<FileRecordDto> content = edgeRepo.serveDescendants(folderId, Arrays.asList(EdgeType.DIRECT, EdgeType.SHARED)).stream()
+                                                .filter(checkFileAccess(user))
+                                                .map(toDtoByUser(user))
+                                                .collect(Collectors.toList());
+
+        // prepare navigation info
+        List<NavDto> navigation = fileSearchService.buildNavigation(user, folderId);
+
+        return new FolderContentDto(navigation, content);
     }
 
     // FILE OPERATIONS
@@ -384,13 +396,13 @@ public class FileService {
 
         // Create and save edges/connection from all of the ancestors to the files (The Closure table)
         FileRecord parent = fileRepo.getOne(folderId);
-        Set<FileRecord> ancestors = Utils.append(edgeRepository.serveOwnedAncestors(folderId), parent);
+        Set<FileRecord> ancestors = Utils.append(edgeRepo.serveOwnedAncestors(folderId), parent);
 
         List<Edge> edges = fileRecords.stream()
                                         .flatMap(descendant -> ancestors.stream().map(ancestor -> toEdge(user,parent,ancestor,descendant)))
                                         .collect(Collectors.toList());
 
-        edgeRepository.saveAll(edges);
+        edgeRepo.saveAll(edges);
 
         // Assign an access level the parent folder has to new files
         List<FileRecord> finalFileRecords = fileRecords;
@@ -443,11 +455,11 @@ public class FileService {
     }
 
     Set<FileRecord> getAllDescendants(FileRecord folder) {
-        return edgeRepository.serveAllDescendants(folder.getId());
+        return edgeRepo.serveAllDescendants(folder.getId());
     }
 
     void saveEdges(List<Edge> edges) {
-        edgeRepository.saveAll(edges);
+        edgeRepo.saveAll(edges);
     }
 
     private List<TreeNode> buildTree(User user, List<FileRecord> files) {
@@ -470,7 +482,7 @@ public class FileService {
                 folderTreeNode.setName(file.getName());
                 folderTreeNode.setType(TreeNode.Type.FOLDER);
 
-                List<FileRecord> subFiles = edgeRepository.serveDescendants(file.getId(), EdgeType.DIRECT);
+                List<FileRecord> subFiles = edgeRepo.serveDescendants(file.getId(), EdgeType.DIRECT);
 
                 folderTreeNode.setSubnodes(buildTree(user, subFiles));
                 nodes.add(folderTreeNode);
@@ -502,7 +514,7 @@ public class FileService {
     private FileRecord toFile(User owner, MultipartFileDecorator savedFile) {
         MultipartFile mFile = savedFile.getMultipartFile();
 
-        Status enabled = statusRepository.findByCode(Status.Code.ENABLED);
+        Status enabled = statusRepo.findByCode(Status.Code.ENABLED);
 
         return FileRecord.createFile(
                 savedFile.getName(),
