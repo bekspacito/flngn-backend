@@ -25,9 +25,11 @@ public interface EdgeRepository extends JpaRepository<Edge, String> {
     @Query("select e.ancestor from Edge e where e.descendant.id = :descendantId")
     Set<FileRecord> serveAncestors(@Param("descendantId") String fileId);
 
-    //TODO : Seems like this part won't work, test it !!!
     @Query("select e.ancestor from Edge e where e.descendant.id = :descendantId and e.edgeType in ('DIRECT','INDIRECT')")
     Set<FileRecord> serveOwnedAncestors(@Param("descendantId") String fileId);
+
+    @Query("select e.ancestor from Edge e where e.descendant.id = :descendantId and e.edgeType in :edgeTypes")
+    Set<FileRecord> serveOwnedAncestors(@Param("descendantId") String fileId, @Param("edgeTypes") List<EdgeType> edgeTypes);
 
     @Query("select e.descendant from Edge e where e.ancestor.id = :ancestorId and e.descendant.status.code <> 'DELETED' ")
     Set<FileRecord> serveAllDescendants(@Param("ancestorId") String ancestorId);

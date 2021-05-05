@@ -405,6 +405,23 @@ public class FileService {
         return new FolderContentDto(navigation, content);
     }
 
+    public FolderContentDto serveInFolder(User user, String fileId) {
+
+        List<NavDto> navigation = fileSearchService.buildNavigation(user, fileId);
+        if(navigation.size() < 2)
+            return new FolderContentDto();
+
+        NavDto parentFolder = navigation.get(navigation.size() - 2);
+
+        List<FileRecordDto> content = edgeRepo.serveDescendants(parentFolder.getId(), Arrays.asList(EdgeType.DIRECT, EdgeType.SHARED))
+                                                .stream()
+                                                .filter(checkFileAccess(user))
+                                                .map(toDtoByUser(user))
+                                                .collect(Collectors.toList());
+
+        return new FolderContentDto(navigation.subList(0, navigation.size() - 1), content);
+    }
+
     // FILE OPERATIONS
 
     @Transactional

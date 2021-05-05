@@ -103,6 +103,12 @@ public class FileController {
         return fileService.serveFolderContent(user, folderId);
     }
 
+    @GetMapping("/folder/serveIn/{fileId}")
+    public FolderContentDto serveInFolder(Principal principal, @PathVariable("fileId") String fileId) {
+        User user = userService.loadUserByUsername(principal.getName());
+        return fileService.serveInFolder(user, fileId);
+    }
+
     // FILE OPERATIONS
 
     @PostMapping("/folder/{folderId}/upload")

@@ -59,7 +59,10 @@ public class FileSearchService {
 
         List<FileRecord> result = edgeRepo.searchByName(searchStartingPoints, namePart);
 
-        return result.stream().map(this::toDto).collect(Collectors.toList());
+        return result.stream()
+                        .distinct()
+                        .map(this::toDto)
+                        .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
