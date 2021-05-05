@@ -19,6 +19,9 @@ import java.util.Set;
 @Repository
 public interface EdgeRepository extends JpaRepository<Edge, String> {
 
+    @Query("select e.edgeOwner from Edge e where e.descendant.id = :fileId and e.edgeType = :edgeType")
+    Set<User> serveOwners(@Param("fileId") String fileId, @Param("edgeType") EdgeType edgeType);
+
     @Query("select e.ancestor from Edge e where e.descendant.id = :descendantId")
     Set<FileRecord> serveAncestors(@Param("descendantId") String fileId);
 

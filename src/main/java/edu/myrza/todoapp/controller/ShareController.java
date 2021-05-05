@@ -4,10 +4,12 @@ import edu.myrza.todoapp.model.dto.share.RefuseShareReq;
 import edu.myrza.todoapp.model.dto.share.ShareDto;
 import edu.myrza.todoapp.model.dto.share.ShareReq;
 import edu.myrza.todoapp.model.dto.share.UnShareReq;
+import edu.myrza.todoapp.model.dto.user.UserDto;
 import edu.myrza.todoapp.model.entity.User;
 import edu.myrza.todoapp.service.ShareService;
 import edu.myrza.todoapp.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -58,6 +60,11 @@ public class ShareController {
 
         // 3. Share
         return shareService.unShare(me, users, req.getFileIds());
+    }
+
+    @GetMapping("/share/users")
+    public List<UserDto> findUsersFileSharedWith(String fileId) {
+        return shareService.findUsersFileSharedWith(fileId);
     }
 
     @PostMapping("/share/refuse")

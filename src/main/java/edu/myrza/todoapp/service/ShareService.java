@@ -1,6 +1,7 @@
 package edu.myrza.todoapp.service;
 
 import edu.myrza.todoapp.model.dto.share.ShareDto;
+import edu.myrza.todoapp.model.dto.user.UserDto;
 import edu.myrza.todoapp.model.entity.*;
 import edu.myrza.todoapp.model.enums.AccessLevelType;
 import edu.myrza.todoapp.model.enums.EdgeType;
@@ -39,6 +40,13 @@ public class ShareService {
         this.statusRepo = statusRepo;
         this.fileService = fileService;
 
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserDto> findUsersFileSharedWith(String fileId) {
+        return edgeRepo.serveOwners(fileId, EdgeType.SHARED).stream()
+                        .map(this::toUserDto)
+                        .collect(Collectors.toList());
     }
 
     // Returns list of successfully shared files/folders
@@ -222,6 +230,12 @@ public class ShareService {
 
             return accessLevel;
         };
+    }
+
+    private UserDto toUserDto(User user) {
+        UserDto dto = new UserDto();
+        dto.setUsername(user.getUsername());
+        return dto;
     }
 
 }

@@ -1,9 +1,6 @@
 package edu.myrza.todoapp.controller;
 
-import edu.myrza.todoapp.model.dto.files.FileIdsWrapper;
-import edu.myrza.todoapp.model.dto.files.FileRecordDto;
-import edu.myrza.todoapp.model.dto.files.FolderContentDto;
-import edu.myrza.todoapp.model.dto.files.MoveFilesReq;
+import edu.myrza.todoapp.model.dto.files.*;
 import edu.myrza.todoapp.model.entity.User;
 import edu.myrza.todoapp.service.FileService;
 import edu.myrza.todoapp.service.UserService;
@@ -11,6 +8,7 @@ import edu.myrza.todoapp.util.FolderTreeNode;
 import edu.myrza.todoapp.util.ResourceDecorator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -36,6 +34,15 @@ public class FileController {
     }
 
     // OPERATIONS APPLIED TO BOTH FILES AND FOLDERS
+
+    @GetMapping("/file/details/{fileId}")
+    public ResponseEntity<?> getDetails(@PathVariable("fileId") String fileId) {
+        Optional<FileRecordDetailsDto> optDetailsDto = fileService.getDetails(fileId);
+        if(!optDetailsDto.isPresent())
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+
+        return ResponseEntity.ok(optDetailsDto.get());
+    }
 
     @PostMapping("/file/{fileId}/rename/{newName}")
     public ResponseEntity<?> renameFile(Principal principal, @PathVariable("fileId") String fileId, @PathVariable("newName") String newName) {

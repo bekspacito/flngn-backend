@@ -1,9 +1,12 @@
 package edu.myrza.todoapp.service;
 
 import edu.myrza.todoapp.exceptions.SystemException;
+import edu.myrza.todoapp.model.dto.files.FileRecordDetailsDto;
 import edu.myrza.todoapp.model.dto.files.FileRecordDto;
 import edu.myrza.todoapp.model.dto.files.FolderContentDto;
 import edu.myrza.todoapp.model.dto.search.NavDto;
+import edu.myrza.todoapp.model.dto.share.ShareDto;
+import edu.myrza.todoapp.model.dto.user.UserDto;
 import edu.myrza.todoapp.model.entity.*;
 import edu.myrza.todoapp.model.enums.AccessLevelType;
 import edu.myrza.todoapp.model.enums.EdgeType;
@@ -16,6 +19,7 @@ import edu.myrza.todoapp.util.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -81,52 +85,89 @@ public class FileService {
 
     // FOLDER/FILE OPERATIONS
 
+    public Optional<FileRecordDetailsDto> getDetails(String fileId) {
+        return fileRepo.findById(fileId).map(this::toDetailsDto);
+    }
+
     @Transactional
     public void deleteFiles(User user, List<String> ids) {
 
-        Status deleted = statusRepo.findByCode(Status.Code.DELETED);
-
         for(String id : ids) {
-
             Optional<FileRecord> optFile = fileRepo.findById(id);
             if(!optFile.isPresent())
                 continue;
 
             FileRecord file = optFile.get();
-
-            // mark the file as 'deleted'
-            file.setStatus(deleted);
-
-            // if the file is 'file' then just save it and continue
-            if(!file.getFileType().equals(FileType.FOLDER)) {
-                fileRepo.save(file);
-                continue;
+            if(file.getOwner().equals(user)) {
+                deleteAsOwner(file);
+            } else {
+                deleteAsShared(Collections.singletonList(user), Collections.singletonList(file));
             }
-
-            // if the file is a folder then mark it's sub folders/files as 'deleted'
-            Set<FileRecord> descendants = edgeRepo.serveAllDescendants(file.getId());
-            for(FileRecord descendant : descendants) {
-                descendant.setStatus(deleted);
-            }
-
-            descendants.add(file);
-            fileRepo.saveAll(descendants);
-
         }
 
+    }
+
+    private void deleteAsShared(List<User> users, List<FileRecord> files) {
+        // 1. Access users' root folders
+        List<Tuple<User, FileRecord>> usersAndRootFolders = getRootFolders(users);
+        List<FileRecord> rootFolders = usersAndRootFolders.stream().map(tuple -> tuple._t2).collect(Collectors.toList());
+
+        for(FileRecord file : files) {
+
+            if(file.getFileType().equals(FileType.FILE)) {
+                // delete all "shared" edges
+                edgeRepo.deleteByAncestorInAndDescendantIn(new HashSet<>(rootFolders), Collections.singleton(file));
+                // delete 'access level' entries
+                accessLevelRepo.deleteByUserInAndFile(new HashSet<>(users), file);
+            }
+
+            if(file.getFileType().equals(FileType.FOLDER)) {
+                // access all of the descendants
+                Set<FileRecord> descendants = Utils.append(getAllDescendants(file), file);
+                // delete edges
+                edgeRepo.deleteByAncestorInAndDescendantIn(new HashSet<>(rootFolders), Collections.singleton(file));
+                // delete 'access_level' entries
+                accessLevelRepo.deleteByUserInAndFileIn(new HashSet<>(users), descendants);
+            }
+        }
+    }
+
+    private void deleteAsOwner(FileRecord file) {
+
+        Status deleted = statusRepo.findByCode(Status.Code.DELETED);
+
+        // mark the file as 'deleted'
+        file.setStatus(deleted);
+
+        // if the file is 'file' then just save it and continue
+        if (!file.getFileType().equals(FileType.FOLDER)) {
+            fileRepo.save(file);
+            return;
+        }
+
+        // if the file is a folder then mark it's sub folders/files as 'deleted'
+        Set<FileRecord> descendants = edgeRepo.serveAllDescendants(file.getId());
+        for (FileRecord descendant : descendants) {
+            descendant.setStatus(deleted);
+        }
+
+        descendants.add(file);
+        fileRepo.saveAll(descendants);
     }
 
     @Transactional
     public Optional<FileRecordDto> renameFile(User user, String fileId, String newName) {
         Optional<FileRecord> optFileRecord = fileRepo.findById(fileId);
-        if(optFileRecord.isPresent()) {
-            FileRecord fileRecord = optFileRecord.get();
-            fileRecord.setName(newName);
-            fileRepo.save(fileRecord);
-            return Optional.of(toDtoByOwner(fileRecord));
-        }
+        if(!optFileRecord.isPresent())
+            return Optional.empty();
 
-        return Optional.empty();
+        FileRecord file = optFileRecord.get();
+        if(!file.getOwner().equals(user))
+            return Optional.empty();
+
+        file.setName(newName);
+        fileRepo.save(file);
+        return Optional.of(toDtoByOwner(file));
     }
 
     // Download multiple files
@@ -140,10 +181,10 @@ public class FileService {
         if(filesToDownload.isEmpty()) return Optional.empty();
 
         // create a tree of files/folders you are gonna send back
-        List<TreeNode> nodes = buildTree(user, filesToDownload);
+        List<TreeNode> nodes = buildTree(filesToDownload);
 
         // use the tree to create appropriate .zip file
-        File compressedFile = fileSystemUtil.compressAndReturnFiles(user.getUsername(), nodes);
+        File compressedFile = fileSystemUtil.compressAndReturnFiles(nodes);
 
         // turn the .zip file into resource
         return Optional.of(new FileSystemResource(compressedFile));
@@ -292,7 +333,6 @@ public class FileService {
     @Transactional(readOnly = true)
     public FolderTreeNode buildFileSystemTree(User user) {
 
-        List<Edge> edges = edgeRepo.serveEdges(user.getUsername(), FileType.FOLDER, Arrays.asList(EdgeType.DIRECT, EdgeType.INDIRECT));
         Queue<FolderTreeNode> queue = new ArrayDeque<>();
 
         FolderTreeNode root = new FolderTreeNode(user.getUsername(), user.getUsername());
@@ -301,8 +341,8 @@ public class FileService {
         while(!queue.isEmpty()) {
             FolderTreeNode currentNode = queue.poll();
             // Direct sub nodes to 'currentNode'
+            List<Edge> edges = edgeRepo.serveEdges(currentNode.getId(), FileType.FOLDER, Collections.singletonList(EdgeType.DIRECT));
             List<FolderTreeNode> directSubNodes = edges.stream()
-                                                         .filter(predicate(user.getUsername(), currentNode))
                                                          .map(e -> new FolderTreeNode(e.getDescendant().getId(), e.getDescendant().getName()))
                                                          .peek(queue::add)
                                                          .collect(Collectors.toList());
@@ -310,16 +350,6 @@ public class FileService {
         }
 
         return root;
-    }
-
-    private Predicate<Edge> predicate(String username, FolderTreeNode currentNode) {
-        return edge -> {
-            if(currentNode.getId().equals(username) // given current node is a root
-                    && edge.getAncestor().getId().equals(currentNode.getId()) // given current node is ancestor
-                    && edge.getEdgeType().equals(EdgeType.DIRECT)) // descendant is direct
-                return true;
-            return edge.getAncestor().getId().equals(currentNode.getId());
-        };
     }
 
     @Transactional
@@ -425,7 +455,7 @@ public class FileService {
         FileRecord fileRecord = optFile.get();
         ResourceDecorator resourceDecorator = new ResourceDecorator();
 
-        File file = fileSystemUtil.serveFile(user.getUsername(), fileId, fileRecord.getExtension());
+        File file = fileSystemUtil.serveFile(fileRecord.getOwner().getUsername(), fileId, fileRecord.getExtension());
         resourceDecorator.setResource(new FileSystemResource(file));
         resourceDecorator.setOriginalName(fileRecord.getName());
 
@@ -462,17 +492,18 @@ public class FileService {
         edgeRepo.saveAll(edges);
     }
 
-    private List<TreeNode> buildTree(User user, List<FileRecord> files) {
+    private List<TreeNode> buildTree(List<FileRecord> files) {
         List<TreeNode> nodes = new ArrayList<>();
 
         for(FileRecord file : files) {
 
             if(file.getFileType().equals(FileType.FILE)) {
-                FileTreeNode treeNode = new FileTreeNode();
-                treeNode.setId(file.getId());
-                treeNode.setType(TreeNode.Type.FILE);
-                treeNode.setName(file.getName());
-                nodes.add(treeNode);
+                FileTreeNode fileTreeNode = new FileTreeNode();
+                fileTreeNode.setId(file.getId());
+                fileTreeNode.setType(TreeNode.Type.FILE);
+                fileTreeNode.setName(file.getName());
+                fileTreeNode.setOwnerName(file.getOwner().getUsername());
+                nodes.add(fileTreeNode);
                 continue;
             }
 
@@ -481,10 +512,10 @@ public class FileService {
                 folderTreeNode.setId(file.getId());
                 folderTreeNode.setName(file.getName());
                 folderTreeNode.setType(TreeNode.Type.FOLDER);
-
+                folderTreeNode.setOwnerName(file.getOwner().getUsername());
                 List<FileRecord> subFiles = edgeRepo.serveDescendants(file.getId(), EdgeType.DIRECT);
 
-                folderTreeNode.setSubnodes(buildTree(user, subFiles));
+                folderTreeNode.setSubnodes(buildTree(subFiles));
                 nodes.add(folderTreeNode);
             }
         }
@@ -592,5 +623,24 @@ public class FileService {
 
     private Predicate<String> notSrcAndDest(String srcId, String destId) {
         return fileId -> !srcId.equals(fileId) && !destId.equals(fileId);
+    }
+
+    private FileRecordDetailsDto toDetailsDto(FileRecord fileRecord) {
+        FileRecordDetailsDto detailsDto = new FileRecordDetailsDto();
+
+        detailsDto.setName(fileRecord.getName());
+        detailsDto.setExt(fileRecord.getExtension());
+        detailsDto.setSize(fileRecord.getSize());
+        detailsDto.setCreatedAt(fileRecord.getCreatedAt());
+        detailsDto.setUpdatedAt(fileRecord.getUpdatedAt());
+        detailsDto.setOwner(toUserDto(fileRecord.getOwner()));
+
+        return detailsDto;
+    }
+
+    private UserDto toUserDto(User user) {
+        UserDto dto = new UserDto();
+        dto.setUsername(user.getUsername());
+        return dto;
     }
 }

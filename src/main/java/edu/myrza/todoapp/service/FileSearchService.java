@@ -105,12 +105,12 @@ public class FileSearchService {
             FileRecord desc = sharedFile._t2;
             for(FileRecordProjection f : navigationList) {
                 newNavigationList.add(f);
-                if(f.getId().equals(desc.getId()))
+                if(f.getId().equals(desc.getId())) {
+                    newNavigationList.add(toProj(ancs));
                     break;
+                }
             }
 
-            newNavigationList.add(toProj(ancs));
-            newNavigationList.add(toProj(root));
             navigationList = newNavigationList;
         }
 

@@ -62,20 +62,20 @@ public class FileSystemUtil {
         return src.toFile();
     }
 
-    public File compressAndReturnFiles(String username, List<TreeNode> nodes) throws IOException {
+    public File compressAndReturnFiles(List<TreeNode> nodes) throws IOException {
 
         byte[] buffer = new byte[8 * 1024 * 1024]; // 8 Mb
         String zipFileName = UUID.randomUUID().toString() + ".zip";
         ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(Paths.get(tmpDir, zipFileName).toString()));
 
-        compressAndReturnFilesRec(username, "", nodes, zos, buffer);
+        compressAndReturnFilesRec("", nodes, zos, buffer);
 
         zos.close();
 
         return Paths.get(tmpDir, zipFileName).toFile();
     }
 
-    private void compressAndReturnFilesRec(String username, String path, List<? extends TreeNode> nodes, ZipOutputStream zos, byte[] buffer) throws IOException {
+    private void compressAndReturnFilesRec(String path, List<? extends TreeNode> nodes, ZipOutputStream zos, byte[] buffer) throws IOException {
 
         // If folder is empty and it isn't a "root" folder, then we create an empty folder
         if(nodes.isEmpty() && !path.isEmpty()) {
@@ -89,7 +89,7 @@ public class FileSystemUtil {
             if(node.getType().equals(TreeNode.Type.FILE)) {
 
                 FileTreeNode fileTreeNode = (FileTreeNode) node;
-                FileInputStream fis = new FileInputStream(Paths.get(root, username, fileTreeNode.getId()).toString());
+                FileInputStream fis = new FileInputStream(Paths.get(root, fileTreeNode.getOwnerName(), fileTreeNode.getId()).toString());
 
                 ZipEntry zipEntry = new ZipEntry(path + fileTreeNode.getName());
                 zos.putNextEntry(zipEntry);
@@ -103,7 +103,7 @@ public class FileSystemUtil {
 
             } else {
                 FolderTreeNode folderTreeNode = (FolderTreeNode) node;
-                compressAndReturnFilesRec(username,path + folderTreeNode.getName() + "/", folderTreeNode.getSubnodes(), zos, buffer);
+                compressAndReturnFilesRec(path + folderTreeNode.getName() + "/", folderTreeNode.getSubnodes(), zos, buffer);
             }
         }
     }

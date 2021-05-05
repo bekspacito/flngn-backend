@@ -10,5 +10,6 @@ public abstract class TreeNode {
     public enum Type { FILE, FOLDER };
 
     private Type type;
+    private String ownerName;
 
 }
