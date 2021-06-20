@@ -15,8 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.security.Principal;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @RestController
 public class FileController {
@@ -54,10 +53,10 @@ public class FileController {
     }
 
     @GetMapping("/files/download")
-    public ResponseEntity<Resource> serveFiles(Principal principal, @RequestBody FileIdsWrapper idsWrapper) throws IOException {
+    public ResponseEntity<Resource> serveFiles(Principal principal, @RequestParam("fileIds") String[] ids) throws IOException {
 
         User user = userService.loadUserByUsername(principal.getName());
-        Optional<Resource> optResource = fileService.downloadFiles(user, idsWrapper.getFileIds());
+        Optional<Resource> optResource = fileService.downloadFiles(user, Arrays.asList(ids));
 
         if(!optResource.isPresent())
             return ResponseEntity.noContent().build();
@@ -67,6 +66,8 @@ public class FileController {
                 .header(CONTENT_DISPOSITION, String.format(CONTENT_DISPOSITION_ATTACH, "files.zip"))
                 .contentLength(resource.contentLength())
                 .body(resource);
+
+//        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/files/move")

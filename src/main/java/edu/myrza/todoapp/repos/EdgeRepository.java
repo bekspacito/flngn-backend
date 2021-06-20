@@ -61,7 +61,7 @@ public interface EdgeRepository extends JpaRepository<Edge, String> {
     @Query("select new edu.myrza.todoapp.util.Tuple(e.ancestor, e.descendant) from Edge e where e.descendant.id in :fileIds and e.edgeOwner = :usr and e.edgeType = 'SHARED'")
     List<Tuple<FileRecord, FileRecord>> findSharedOnes(@Param("usr") User user, @Param("fileIds") List<String> fileIds);
 
-    @Query("select e.descendant from Edge e where e.ancestor in :ancs and e.descendant.name like %:namePart% ")
+    @Query("select e.descendant from Edge e where e.ancestor in :ancs and lower( e.descendant.name ) like lower( concat('%' ,:namePart ,'%') ) ")
     List<FileRecord> searchByName(@Param("ancs") List<FileRecord> ancestors, @Param("namePart") String namePart);
 
     @Query(nativeQuery = true, value = "with recursive nav as (" +

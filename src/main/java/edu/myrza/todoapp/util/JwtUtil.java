@@ -14,7 +14,7 @@ import java.util.function.Function;
 @Service
 public class JwtUtil {
 
-    private String SECRET_KEY = "beks_chort";
+    private String SECRET_KEY = "MY_SUPER_SECRET";
 
     //Token verification means
 
@@ -50,7 +50,7 @@ public class JwtUtil {
         return Jwts.builder().setClaims(claims)
                             .setSubject(subject)
                             .setIssuedAt(new Date(System.currentTimeMillis()))
-                            .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 6)) // 10 hours
+                            .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 24 * 14)) // 14 days
                             .signWith(SignatureAlgorithm.HS256, SECRET_KEY).compact();
     }
 

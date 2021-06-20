@@ -61,6 +61,7 @@ public class FileSearchService {
 
         return result.stream()
                         .distinct()
+                        .filter(fr -> !fr.getStatus().getCode().equals(Status.Code.DELETED))
                         .map(this::toDto)
                         .collect(Collectors.toList());
     }
